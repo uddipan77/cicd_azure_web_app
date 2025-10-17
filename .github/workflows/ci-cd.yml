@@ -1,0 +1,44 @@
+name: CI-CD to S3
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Basic check (ensure index.html exists)
+        run: |
+          test -f index.html && echo "index.html found" || (echo "index.html missing"; exit 1)
+
+  deploy:
+    # only deploy after merge to main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install AWS CLI
+        run: pip install --user awscli && echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Sync site to S3
+        run: |
+          aws s3 sync . s3://${{ secrets.S3_BUCKET }} --delete \
+            --exclude ".git/*" --exclude ".github/*" --exclude "README.md"
+
+      - name: (Optional) Make index.html always refresh
+        run: |
+          aws s3 cp index.html s3://${{ secrets.S3_BUCKET }}/index.html \
+            --cache-control "no-cache, no-store, must-revalidate" --content-type text/html
